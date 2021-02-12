@@ -1,0 +1,29 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIdE
+*.out
+
+# Test coverage output
+coverage*.*
+
+# server binary
+./server
+
+# PId file generated to support live reload
+.pid
+
+# Enviroment setup
+#.env
+
+# Visual Studio 2015 cache/options directory
+.vs/
+.vscode/
+.idea/
