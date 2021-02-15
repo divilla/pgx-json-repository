@@ -59,7 +59,7 @@ func main()  {
 
 	//insert
 	insert := map[string]interface{}{
-		"firstName": "First", //you can have first_name or "firstName" or "First_Name" in the database - all works
+		"firstName": "First", //col name can be first_name or "firstName" or "First_Name"
 		"lastName": "Last",
 	}
 	//returns string {"rowsAffected": 1} by default
@@ -70,7 +70,7 @@ func main()  {
 	//update will auto recognize "id" as primary key and create where condition updating by primary key
 	update := map[string]interface{}{
 		"id": 1, // you can have "Id" in the database
-		"firstName": "First", //you can have first_name or "firstName" or "First_Name" in the database - all works
+		"firstName": "First",
 		"lastName": "Last",
 	}
 	//returns string {"rowsAffected": 1} by default
@@ -160,7 +160,7 @@ func main()  {
 
 	//insert
 	values := map[string]interface{}{
-		"firstName": "First", //you can have first_name or "firstName" or "First_Name" in the database - all works
+		"firstName": "First", //col name can be first_name or "firstName" or "First_Name"
 		"lastName": "Last",
 	}
 	//returns string {"rowsAffected": 1} by default
@@ -175,7 +175,7 @@ func main()  {
 	//update will auto recognize "id" as primary key and create where condition updating by primary key
 	update := map[string]interface{}{
 		"id": 1, // you can have "Id" in the database
-		"firstName": "First", //you can have first_name or "firstName" or "First_Name" in the database - all works
+		"firstName": "First",
 		"lastName": "Last",
 	}
 	//returns string {"id":1}
