@@ -1,76 +1,32 @@
-package pgxexec
+package pgxjrep
 
 import (
 	"context"
-	"encoding/json"
-	"github.com/pkg/errors"
+	"github.com/jackc/pgtype"
 	"strconv"
 	"strings"
 )
 
 type QueryStatement struct {
-	target       string
-	selectClause *selectClause
-	whereClause  *whereClause
-	orderBy      string
-	limit        uint64
-	offset       uint64
-	params       *params
+	builder     *Builder
+	schema      *DbSchema
+	target      string
+	selectCols  []string
+	distinct    bool
+	whereClause *whereClause
+	orderBy     string
+	limit       uint64
+	offset      uint64
+	params      *params
 }
 
-var TargetRequiredErr = errors.New("'target' is required parameter")
-
-func Query(target string) *QueryStatement {
-	p := &params{}
-	w := &whereClause{params: p}
-	q := &QueryStatement{
-		target:       target,
-		selectClause: &selectClause{},
-		whereClause:  w,
-		params:       p,
-	}
-
-	return q
-}
-
-//ptr argument must be pointer
-func (s *QueryStatement) Select(ptr interface{}) *QueryStatement {
-	s.selectClause.ptrStr = ptr
-	for _, v := range FieldPointers(ptr) {
-		v.ColumnName = Quote(v.ColumnName)
-		s.selectClause.colPtrs = append(s.selectClause.colPtrs, v)
-	}
-
+func (s *QueryStatement) Distinct() *QueryStatement {
+	s.distinct = true
 	return s
 }
 
-func (s *QueryStatement) SelectAdd(column string, valuePtr interface{}, as ...string) *QueryStatement {
-	asLen := len(as)
-	for k, v := range s.selectClause.colPtrs {
-		if v.ColumnName == column {
-			s.selectClause.colPtrs[k].Value = valuePtr
-			if asLen > 0 {
-				s.selectClause.colPtrs[k].As = as[0]
-			}
-			return s
-		}
-	}
-
-	var asValue string
-	if asLen > 0 {
-		asValue = as[0]
-	}
-	s.selectClause.colPtrs = append(s.selectClause.colPtrs, FieldValue{
-		ColumnName: column,
-		Value:      valuePtr,
-		As:         asValue,
-	})
-
-	return s
-}
-
-func (s *QueryStatement) SelectDistinct() *QueryStatement {
-	s.selectClause.distinct = true
+func (s *QueryStatement) Select(c ...string) *QueryStatement {
+	s.selectCols = c
 	return s
 }
 
@@ -80,169 +36,13 @@ func (s *QueryStatement) WhereStatement(statement string, args ...interface{}) *
 	return s
 }
 
-func (s *QueryStatement) WhereValues(values interface{}) *QueryStatement {
-	s.whereClause.valuesPlan = FieldValues(values)
+func (s *QueryStatement) Where(m map[string]interface{}) *QueryStatement {
+	s.whereClause.values = m
 	return s
 }
 
-func (s *QueryStatement) WhereValueIs(col string, value interface{}) *QueryStatement {
-	if len(s.whereClause.valuesPlan) > 0 {
-		for k, v := range s.whereClause.valuesPlan {
-			if v.ColumnName == col {
-				s.whereClause.valuesPlan[k].Value = value
-				return s
-			}
-		}
-	}
-
-	s.whereClause.valuesPlan = append(s.whereClause.valuesPlan, FieldValue{
-		ColumnName: col,
-		Value:      value,
-	})
-
-	return s
-}
-
-func (s *QueryStatement) WhereValueStartsWith(col string, value interface{}) *QueryStatement {
-	if len(s.whereClause.valuesPlan) > 0 {
-		for k, v := range s.whereClause.valuesPlan {
-			if v.ColumnName == col {
-				s.whereClause.valuesPlan[k].StartsWith = true
-				s.whereClause.valuesPlan[k].Value = value
-				return s
-			}
-		}
-	}
-
-	s.whereClause.valuesPlan = append(s.whereClause.valuesPlan, FieldValue{
-		ColumnName: col,
-		StartsWith: true,
-		Value:      value,
-	})
-
-	return s
-}
-
-func (s *QueryStatement) WhereValueEndsWith(col string, value interface{}) *QueryStatement {
-	if len(s.whereClause.valuesPlan) > 0 {
-		for k, v := range s.whereClause.valuesPlan {
-			if v.ColumnName == col {
-				s.whereClause.valuesPlan[k].EndsWith = true
-				s.whereClause.valuesPlan[k].Value = value
-				return s
-			}
-		}
-	}
-
-	s.whereClause.valuesPlan = append(s.whereClause.valuesPlan, FieldValue{
-		ColumnName: col,
-		EndsWith:   true,
-		Value:      value,
-	})
-
-	return s
-}
-
-func (s *QueryStatement) WhereValueContains(col string, value interface{}) *QueryStatement {
-	if len(s.whereClause.valuesPlan) > 0 {
-		for k, v := range s.whereClause.valuesPlan {
-			if v.ColumnName == col {
-				s.whereClause.valuesPlan[k].Contains = true
-				s.whereClause.valuesPlan[k].Value = value
-				return s
-			}
-		}
-	}
-
-	s.whereClause.valuesPlan = append(s.whereClause.valuesPlan, FieldValue{
-		ColumnName: col,
-		Contains:   true,
-		Value:      value,
-	})
-
-	return s
-}
-
-func (s *QueryStatement) WhereFilter(values interface{}) *QueryStatement {
-	s.whereClause.filterPlan = FieldValues(values)
-	return s
-}
-
-func (s *QueryStatement) WhereFilterIs(col string, value interface{}) *QueryStatement {
-	if len(s.whereClause.filterPlan) > 0 {
-		for k, v := range s.whereClause.filterPlan {
-			if v.ColumnName == col {
-				s.whereClause.filterPlan[k].Value = value
-				return s
-			}
-		}
-	}
-
-	s.whereClause.filterPlan = append(s.whereClause.filterPlan, FieldValue{
-		ColumnName: col,
-		Value:      value,
-	})
-
-	return s
-}
-
-func (s *QueryStatement) WhereFilterStartsWith(col string, value interface{}) *QueryStatement {
-	if len(s.whereClause.filterPlan) > 0 {
-		for k, v := range s.whereClause.filterPlan {
-			if v.ColumnName == col {
-				s.whereClause.filterPlan[k].StartsWith = true
-				s.whereClause.filterPlan[k].Value = value
-				return s
-			}
-		}
-	}
-
-	s.whereClause.filterPlan = append(s.whereClause.filterPlan, FieldValue{
-		ColumnName: col,
-		StartsWith: true,
-		Value:      value,
-	})
-
-	return s
-}
-
-func (s *QueryStatement) WhereFilterEndsWith(col string, value interface{}) *QueryStatement {
-	if len(s.whereClause.filterPlan) > 0 {
-		for k, v := range s.whereClause.filterPlan {
-			if v.ColumnName == col {
-				s.whereClause.filterPlan[k].EndsWith = true
-				s.whereClause.filterPlan[k].Value = value
-				return s
-			}
-		}
-	}
-
-	s.whereClause.filterPlan = append(s.whereClause.filterPlan, FieldValue{
-		ColumnName: col,
-		EndsWith:   true,
-		Value:      value,
-	})
-
-	return s
-}
-
-func (s *QueryStatement) WhereFilterContains(col string, value interface{}) *QueryStatement {
-	if len(s.whereClause.filterPlan) > 0 {
-		for k, v := range s.whereClause.filterPlan {
-			if v.ColumnName == col {
-				s.whereClause.filterPlan[k].Contains = true
-				s.whereClause.filterPlan[k].Value = value
-				return s
-			}
-		}
-	}
-
-	s.whereClause.filterPlan = append(s.whereClause.filterPlan, FieldValue{
-		ColumnName: col,
-		Contains:   true,
-		Value:      value,
-	})
-
+func (s *QueryStatement) Filter(m map[string]interface{}) *QueryStatement {
+	s.whereClause.filter = m
 	return s
 }
 
@@ -261,37 +61,48 @@ func (s *QueryStatement) Offset(val uint64) *QueryStatement {
 	return s
 }
 
-func (s *QueryStatement) Build() (string, []interface{}, error) {
-	var err error
-	var c string
+func (s *QueryStatement) Build() (string, []interface{}) {
 	var q = "SELECT"
 
-	c, err = s.selectClause.build()
-	if err != nil {
-		return "", nil, err
+	if s.distinct {
+		q += " DISTINCT"
 	}
-	q += c
 
-	if s.target == "" {
-		return "", nil, TargetRequiredErr
+	if len(s.selectCols) > 0 {
+		var cols []string
+		for _, v := range s.schema.ResolveColumns(s.target, s.selectCols) {
+			if v.DbName == v.JsonName {
+				cols = append(cols, s.schema.Quote(v.DbName))
+			} else {
+				cols = append(cols, s.schema.Quote(v.DbName)+" AS "+s.schema.Quote(v.JsonName))
+			}
+		}
+		q += " " + strings.Join(cols, ", ")
+	} else {
+		var cols []string
+		for _, v := range s.schema.ColSchema(s.target) {
+			json := s.schema.ToJsonCase(v.ColumnName)
+			if v.ColumnName == json {
+				cols = append(cols, s.schema.Quote(v.ColumnName))
+			} else {
+				cols = append(cols, s.schema.Quote(v.ColumnName)+" AS "+s.schema.Quote(json))
+			}
+		}
+		q += " " + strings.Join(cols, ", ")
 	}
-	q += " FROM " + QuoteRelationName(s.target)
 
-	c, err = s.whereClause.build()
-	if err != nil {
-		return "", nil, err
-	}
-	q += c
+	q += " FROM " + s.schema.QuoteRelation(s.target)
+	q += s.whereClause.build()
 
 	if s.orderBy != "" {
 		exps := strings.Split(s.orderBy, ",")
 		var expsNew []string
 		for _, v := range exps {
-			flds := strings.Fields(v)
-			if len(flds) > 1 && strings.ToUpper(flds[1]) == "DESC" {
-				expsNew = append(expsNew, Quote(flds[0])+" DESC")
-			} else if len(flds) > 0 {
-				expsNew = append(expsNew, Quote(flds[0]))
+			fls := strings.Fields(v)
+			if len(fls) > 1 && strings.ToUpper(fls[1]) == "DESC" {
+				expsNew = append(expsNew, s.schema.Quote(fls[0])+" DESC")
+			} else if len(fls) > 0 {
+				expsNew = append(expsNew, s.schema.Quote(fls[0]))
 			}
 		}
 		q += " ORDER BY " + strings.Join(expsNew, ", ")
@@ -305,46 +116,45 @@ func (s *QueryStatement) Build() (string, []interface{}, error) {
 		q += " OFFSET " + strconv.FormatUint(s.offset, 10)
 	}
 
-	return q, s.params.args, nil
+	return q, s.params.args
 }
 
-func (s *QueryStatement) All(conn PgxConn, ctx context.Context) error {
-	jsn, err := s.AllJson(conn, ctx)
+func (s *QueryStatement) All(conn PgxConn, ctx context.Context) (string, error) {
+	sql, args := s.Build()
+
+	sql = "SELECT json_agg(t) as json FROM (" + sql + ") t;"
+
+	json := new(pgtype.Text)
+	err := conn.QueryRow(ctx, sql, args...).Scan(json)
 	if err != nil {
-		return err
+		return "", err
+	}
+	if json.Status == pgtype.Null {
+		return "[]", err
 	}
 
-	err = json.Unmarshal([]byte(jsn), &s.selectClause.ptrStr)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return json.String, nil
 }
 
-func (s *QueryStatement) One(conn PgxConn, ctx context.Context) error {
-	jsn, err := s.OneJson(conn, ctx)
-	if err != nil {
-		return err
-	}
+func (s *QueryStatement) One(conn PgxConn, ctx context.Context) (string, error) {
+	sql, args := s.Build()
 
-	err = json.Unmarshal([]byte(jsn), &s.selectClause.ptrStr)
-	if err != nil {
-		return err
-	}
+	sql = "SELECT row_to_json(t, false) as json FROM (" + sql + ") t;"
+	jsn := new(string)
 
-	return nil
-}
-
-func (s *QueryStatement) Scalar(conn PgxConn, ctx context.Context) (interface{}, error) {
-	sql, args, err := s.Build()
+	err := conn.QueryRow(ctx, sql, args...).Scan(jsn)
 	if err != nil {
 		return "", err
 	}
 
-	scalar := new(interface{})
+	return *jsn, nil
+}
 
-	err = conn.QueryRow(ctx, sql, args...).Scan(scalar)
+func (s *QueryStatement) Scalar(conn PgxConn, ctx context.Context) (interface{}, error) {
+	sql, args := s.Build()
+
+	scalar := new(interface{})
+	err := conn.QueryRow(ctx, sql, args...).Scan(scalar)
 	if err != nil {
 		return "", err
 	}
@@ -352,50 +162,12 @@ func (s *QueryStatement) Scalar(conn PgxConn, ctx context.Context) (interface{},
 	return *scalar, nil
 }
 
-func (s *QueryStatement) AllJson(conn PgxConn, ctx context.Context) (string, error) {
-	sql, args, err := s.Build()
-	if err != nil {
-		return "", err
-	}
-
-	sql = "SELECT json_agg(t) as json FROM (" + sql + ") t;"
-	jsn := new(string)
-
-	err = conn.QueryRow(ctx, sql, args...).Scan(jsn)
-	if err != nil {
-		return "", err
-	}
-
-	return *jsn, nil
-}
-
-func (s *QueryStatement) OneJson(conn PgxConn, ctx context.Context) (string, error) {
-	sql, args, err := s.Build()
-	if err != nil {
-		return "", err
-	}
-
-	sql = "SELECT row_to_json(t, false) as json FROM (" + sql + ") t;"
-	jsn := new(string)
-
-	err = conn.QueryRow(ctx, sql, args...).Scan(jsn)
-	if err != nil {
-		return "", err
-	}
-
-	return *jsn, nil
-}
-
 func (s *QueryStatement) Exists(conn PgxConn, ctx context.Context) (bool, error) {
-	sql, args, err := s.Build()
-	if err != nil {
-		return false, err
-	}
+	sql, args := s.Build()
+	sql = "SELECT EXISTS(" + sql + ") as exists;"
 
-	sql = "SELECT exists(" + sql + ") as exists;"
 	exists := new(bool)
-
-	err = conn.QueryRow(ctx, sql, args...).Scan(exists)
+	err := conn.QueryRow(ctx, sql, args...).Scan(exists)
 	if err != nil {
 		return false, err
 	}
@@ -404,16 +176,12 @@ func (s *QueryStatement) Exists(conn PgxConn, ctx context.Context) (bool, error)
 }
 
 func (s *QueryStatement) Count(conn PgxConn, ctx context.Context) (uint64, error) {
-	sql, args, err := s.Build()
-	if err != nil {
-		return 0, err
-	}
-
+	sql, args := s.Build()
 	fromInd := strings.Index(sql, "FROM")
-	sql = "SELECT count(*) " + sql[fromInd:]
-	count := new(uint64)
+	sql = "SELECT COUNT(*) " + sql[fromInd:]
 
-	err = conn.QueryRow(ctx, sql, args...).Scan(count)
+	count := new(uint64)
+	err := conn.QueryRow(ctx, sql, args...).Scan(count)
 	if err != nil {
 		return 0, err
 	}

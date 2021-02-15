@@ -1,4 +1,4 @@
-package pgxexec
+package pgxjrep
 
 import (
 	"context"
@@ -15,9 +15,3 @@ type PgxConn interface {
 	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
 	QueryFunc(ctx context.Context, sql string, args []interface{}, scans []interface{}, f func(pgx.QueryFuncRow) error) (pgconn.CommandTag, error)
 }
-
-//type Command interface {
-//	Build() (string, []interface{})
-//	SetCommandTag(ct *pgconn.CommandTag)
-//	IsReturning() (*returning, bool)
-//}

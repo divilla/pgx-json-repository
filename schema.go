@@ -1,16 +1,24 @@
-package pgxexec
+package pgxjrep
 
 import (
 	"context"
 	"encoding/json"
 	"github.com/iancoleman/strcase"
-	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
+	"os"
+	"regexp"
 	"strings"
 )
 
-type Schemata map[string]TableSchema
+const PublicSchema = "public"
 
-type TableSchema map[string][]ColumnSchema
+type DbSchema struct {
+	ToDbCase   func(input string) string
+	ToJsonCase func(input string) string
+	colSchema  map[string]map[string][]ColumnSchema
+	colMap     map[string]map[string]map[string]bool
+	keywords   []string
+}
 
 type ColumnSchema struct {
 	SchemaName             string   `json:"schemaName"`
@@ -36,16 +44,34 @@ type ColumnSchema struct {
 	ColumnComment          bool     `json:"columnComment"`
 }
 
-type KeywordSchema struct {
+type ColumnData struct {
+	DbName   string
+	JsonName string
+	Value    interface{}
+	IsString bool
+	IsPk     bool
+}
+
+type keywordSchema struct {
 	Word string `json:"word"`
 }
 
-var (
-	schemata = make(Schemata)
-	keywords []string
-)
+var log *logrus.Logger
 
-func InitSchema(conn PgxConn, ctx context.Context) error {
+func NewSchema(conn PgxConn, ctx context.Context) (*DbSchema, error) {
+	log = logrus.New()
+	log.Formatter.(*logrus.TextFormatter).ForceColors = true
+	log.Formatter.(*logrus.TextFormatter).DisableTimestamp = false
+	log.Level = logrus.TraceLevel
+	log.Out = os.Stdout
+
+	dbSchema := &DbSchema{
+		ToDbCase:   strcase.ToSnake,
+		ToJsonCase: strcase.ToLowerCamel,
+		colSchema:  make(map[string]map[string][]ColumnSchema),
+		colMap:     make(map[string]map[string]map[string]bool),
+	}
+
 	sql := `
 		SELECT json_agg(t)
 			FROM (SELECT
@@ -143,23 +169,32 @@ func InitSchema(conn PgxConn, ctx context.Context) error {
 	jsn := new(string)
 	err := conn.QueryRow(ctx, sql).Scan(jsn)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var res []ColumnSchema
 	err = json.Unmarshal([]byte(*jsn), &res)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for _, v := range res {
-		if _, ok := schemata[v.SchemaName]; !ok {
-			schemata[v.SchemaName] = TableSchema{}
+		if _, ok := dbSchema.colSchema[v.SchemaName]; !ok {
+			dbSchema.colSchema[v.SchemaName] = make(map[string][]ColumnSchema)
+			dbSchema.colMap[v.SchemaName] = make(map[string]map[string]bool)
 		}
-		if _, ok := schemata[v.SchemaName][v.RelationName]; !ok {
-			schemata[v.SchemaName][v.RelationName] = make([]ColumnSchema, 0)
+
+		if _, ok := dbSchema.colSchema[v.SchemaName][v.RelationName]; !ok {
+			dbSchema.colMap[v.SchemaName][v.RelationName] = make(map[string]bool)
 		}
-		schemata[v.SchemaName][v.RelationName] = append(schemata[v.SchemaName][v.RelationName], v)
+
+		dbSchema.colSchema[v.SchemaName][v.RelationName] = append(dbSchema.colSchema[v.SchemaName][v.RelationName], v)
+
+		dbSchema.colMap[v.SchemaName][v.RelationName][v.ColumnName] = true
+		jsonName := dbSchema.ToJsonCase(v.ColumnName)
+		if jsonName != v.ColumnName {
+			dbSchema.colMap[v.SchemaName][v.RelationName][jsonName] = false
+		}
 	}
 
 	//keywords
@@ -167,23 +202,129 @@ func InitSchema(conn PgxConn, ctx context.Context) error {
 	jsn = new(string)
 	err = conn.QueryRow(ctx, sql).Scan(jsn)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	var ks []KeywordSchema
+	var ks []keywordSchema
 	err = json.Unmarshal([]byte(*jsn), &ks)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for _, v := range ks {
-		keywords = append(keywords, v.Word)
+		dbSchema.keywords = append(dbSchema.keywords, v.Word)
 	}
 
-	return nil
+	return dbSchema, nil
 }
 
-func Schema(relation string) ([]ColumnSchema, error) {
+func (s *DbSchema) ColSchema(relation string) []ColumnSchema {
+	sch, rel := s.resolveNames(relation)
+
+	return s.colSchema[sch][rel]
+}
+
+func (s *DbSchema) ColMap(relation string) map[string]bool {
+	sch, rel := s.resolveNames(relation)
+
+	return s.colMap[sch][rel]
+}
+
+func (s *DbSchema) ResolveColumns(relation string, columns []string) []ColumnData {
+	colMap := make(map[string]interface{})
+	for _, v := range columns {
+		colMap[v] = nil
+	}
+
+	return s.ResolveColumnMap(relation, colMap)
+}
+
+func (s *DbSchema) ResolveColumnMap(relation string, values map[string]interface{}) []ColumnData {
+	var colVals []ColumnData
+	var isChar = func(term string) bool {
+		for _, v := range []string{"varchar", "char", "text"} {
+			if term == v {
+				return true
+			}
+		}
+		return false
+	}
+
+	cols := s.ColSchema(relation)
+	for _, col := range cols {
+		cd := ColumnData{
+			DbName:   col.ColumnName,
+			JsonName: s.ToJsonCase(col.ColumnName),
+			Value:    nil,
+			IsString: isChar(col.DataType),
+			IsPk:     col.IsPrimaryKey,
+		}
+
+		if val, ok := values[cd.DbName]; ok {
+			cd.Value = val
+			colVals = append(colVals, cd)
+		} else if val, ok = values[cd.JsonName]; ok {
+			cd.Value = val
+			colVals = append(colVals, cd)
+		}
+	}
+
+	var unresolvedColumns []string
+	colMap := s.ColMap(relation)
+	for k := range values {
+		if _, ok := colMap[k]; !ok {
+			unresolvedColumns = append(unresolvedColumns, k)
+		}
+	}
+	if len(unresolvedColumns) > 0 {
+		log.Warningf("Relation %s does not contain columns: "+strings.Join(unresolvedColumns, ", "), relation)
+	}
+
+	return colVals
+}
+
+func (s *DbSchema) SingleQuote(value string) string {
+	return "'" + value + "'"
+}
+
+func (s *DbSchema) Quote(value string) string {
+	if strings.ContainsAny(value, "\"") {
+		return value
+	}
+
+	match, _ := regexp.MatchString("[A-Z]+", value)
+	if match {
+		return "\"" + value + "\""
+	}
+
+	for _, v := range s.keywords {
+		if v == value {
+			return "\"" + value + "\""
+		}
+	}
+
+	return value
+}
+
+func (s *DbSchema) UnQuote(value string) string {
+	if !strings.ContainsAny(value, "\"") {
+		return value
+	}
+
+	return strings.Replace(value, "\"", "", -1)
+}
+
+func (s *DbSchema) QuoteRelation(relation string) string {
+	sch, rel := s.resolveNames(relation)
+
+	if sch == PublicSchema {
+		return s.Quote(rel)
+	}
+
+	return s.Quote(sch) + "." + s.Quote(rel)
+}
+
+func (s *DbSchema) resolveNames(relation string) (string, string) {
 	var sch, rel string
 	names := strings.Split(relation, ".")
 
@@ -192,62 +333,18 @@ func Schema(relation string) ([]ColumnSchema, error) {
 		sch = names[0]
 		rel = names[1]
 	} else if namesLen == 1 {
-		sch = "public"
+		sch = PublicSchema
 		rel = names[0]
 	} else {
-		return nil, errors.New("invalid relation name argument")
+		log.Panicln("invalid relation name: ", relation)
 	}
 
-	if _, ok := schemata[sch]; !ok {
-		return nil, errors.New("schema not found")
+	if _, ok := s.colSchema[sch]; !ok {
+		log.Panicln("schema not found: ", sch)
 	}
-	if _, ok := schemata[sch][rel]; !ok {
-		return nil, errors.New("relation not found")
-	}
-
-	return schemata[sch][rel], nil
-}
-
-func ColumnNames(relation string) ([]string, error) {
-	css, err := Schema(relation)
-	if err != nil {
-		return nil, err
+	if _, ok := s.colSchema[sch][rel]; !ok {
+		log.Panicln("relation not found: ", sch, rel)
 	}
 
-	var cols []string
-	for _, v := range css {
-		cols = append(cols, v.ColumnName)
-	}
-
-	return cols, nil
-}
-
-func ColumnNamesCamelCase(relation string) ([]string, error) {
-	css, err := Schema(relation)
-	if err != nil {
-		return nil, err
-	}
-
-	var cols []string
-	for _, v := range css {
-		cols = append(cols, strcase.ToLowerCamel(v.ColumnName))
-	}
-
-	return cols, nil
-}
-
-func PrimaryKey(relation string) ([]string, error) {
-	css, err := Schema(relation)
-	if err != nil {
-		return nil, err
-	}
-
-	var cols []string
-	for _, v := range css {
-		if v.IsPrimaryKey {
-			cols = append(cols, v.ColumnName)
-		}
-	}
-
-	return cols, nil
+	return sch, rel
 }

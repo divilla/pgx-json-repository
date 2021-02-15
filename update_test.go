@@ -1,13 +1,14 @@
-package pgxexec_test
+package pgxjrep_test
 
 import (
-	"github.com/divilla/pgxexec"
+	"github.com/divilla/pgxjrep"
 	"github.com/stretchr/testify/assert"
+	"github.com/tidwall/gjson"
 	"testing"
 )
 
 type updateBuild struct {
-	str  *pgxexec.UpdateStatement
+	str  *pgxjrep.UpdateStatement
 	stm  string
 	args []interface{}
 	ret  int
@@ -15,91 +16,110 @@ type updateBuild struct {
 }
 
 func TestUpdateBuild(t *testing.T) {
+	Init(t)
+
 	buildResults := []updateBuild{
-		{str: pgxexec.Update("test"), stm: "", args: nil, err: pgxexec.UpdateWithoutSetValuesErr},
-		{str: pgxexec.Update(""), stm: "", args: nil, err: pgxexec.TargetRequiredErr},
-		{str: pgxexec.Update("test").Set(test1Insert),
-			stm:  "UPDATE test SET a = $1, b = $2, c = NULL",
+		//{str: builder.Update("test"), stm: "", args: nil, err: pgxjrep.UpdateWithoutSetValuesErr},
+		{str: builder.Update("test1").Set(insert1),
+			stm:  "UPDATE test1 SET a_a = $1, \"b_B\" = $2, cc_cc = NULL",
 			args: append(args, "a", 1)},
-		{str: pgxexec.Update("test").Set(test1Insert).WhereValues(pk1Inst),
-			stm:  "UPDATE test SET a = $1, b = $2, c = NULL WHERE id = $3",
-			args: append(args, "a", 1, 1)},
-		{str: pgxexec.Update("test.Test2").Set(test2Insert).WhereValues(pk2Inst),
+		{str: builder.Update("test1").Set(insert2),
+			stm:  "UPDATE test1 SET a_a = $1, \"b_B\" = $2, cc_cc = NULL",
+			args: append(args, "a", 1)},
+		{str: builder.Update("test.Test2").Set(insert3),
+			stm:  "UPDATE test.\"Test2\" SET \"X\" = $1, \"Y\" = $2, \"Z\" = NULL",
+			args: append(args, "a", 1)},
+		{str: builder.Update("test.Test2").Set(insert4),
+			stm:  "UPDATE test.\"Test2\" SET \"X\" = $1, \"Y\" = $2, \"Z\" = NULL",
+			args: append(args, "c", 3)},
+		{str: builder.Update("test1").Set(insert1).Where(pk1),
+			stm:  "UPDATE test1 SET a_a = $1, \"b_B\" = $2, cc_cc = NULL WHERE id = $3",
+			args: append(args, "a", 1, 11)},
+		{str: builder.Update("test.Test2").Set(insert3).Where(pk1),
 			stm:  "UPDATE test.\"Test2\" SET \"X\" = $1, \"Y\" = $2, \"Z\" = NULL WHERE \"Id\" = $3",
-			args: append(args, "a", 1, 1)},
-		{str: pgxexec.Update("test.Test2").SetWherePrimaryKey(test4UpdatePk),
-			stm:  "UPDATE test.\"Test2\" SET \"X\" = $1, \"Y\" = $2, \"Z\" = $3 WHERE \"Id\" = $4",
-			args: append(args, "fff", 22, true, 2)},
-		{str: pgxexec.Update("test").Set(test1Insert).WhereValuesAdd("a", "a").WhereValuesAdd("c", nil),
-			stm:  "UPDATE test SET a = $1, b = $2, c = NULL WHERE a = $3 AND c IS NULL",
-			args: append(args, "a", 1, "a")},
-		{str: pgxexec.Update("test.Test2").Set(test2Insert).WhereValues(test3Inst),
-			stm:  "UPDATE test.\"Test2\" SET \"X\" = $1, \"Y\" = $2, \"Z\" = NULL WHERE \"Y\" = $3 AND \"Z\" IS NULL",
-			args: append(args, "a", 1, 1)},
-		{str: pgxexec.Update("test.Test2").SetWherePrimaryKey(test4UpdatePk).Returning(&test4UpdatePk),
-			stm:  "UPDATE test.\"Test2\" SET \"X\" = $1, \"Y\" = $2, \"Z\" = $3 WHERE \"Id\" = $4 RETURNING \"Id\", \"X\", \"Y\", \"Z\"",
-			args: append(args, "fff", 22, true, 2)},
-		{str: pgxexec.Update("test.Test2").SetWherePrimaryKey(test4UpdatePk).ReturningSet("Id", &id),
-			stm:  "UPDATE test.\"Test2\" SET \"X\" = $1, \"Y\" = $2, \"Z\" = $3 WHERE \"Id\" = $4 RETURNING \"Id\"",
-			args: append(args, "fff", 22, true, 2)},
+			args: append(args, "a", 1, 11)},
+		{str: builder.Update("test1").SetWherePk(update1),
+			stm:  "UPDATE test1 SET a_a = $1, \"b_B\" = $2, cc_cc = NULL WHERE id = $3",
+			args: append(args, "a", 1, 22)},
+		{str: builder.Update("test1").SetWherePk(update2),
+			stm:  "UPDATE test1 SET a_a = $1, \"b_B\" = $2, cc_cc = NULL WHERE id = $3",
+			args: append(args, "a", 1, 22)},
+		{str: builder.Update("test.Test2").SetWherePk(update3),
+			stm:  "UPDATE test.\"Test2\" SET \"X\" = $1, \"Y\" = $2, \"Z\" = NULL WHERE \"Id\" = $3",
+			args: append(args, "a", 1, 22)},
+		{str: builder.Update("test.Test2").SetWherePk(update4),
+			stm:  "UPDATE test.\"Test2\" SET \"X\" = $1, \"Y\" = $2, \"Z\" = NULL WHERE \"Id\" = $3",
+			args: append(args, "a", 1, 22)},
+		{str: builder.Update("test1").SetWherePk(update1).Returning("id"),
+			stm:  "UPDATE test1 SET a_a = $1, \"b_B\" = $2, cc_cc = NULL WHERE id = $3 RETURNING json_build_object('id', id)",
+			args: append(args, "a", 1, 22)},
+		{str: builder.Update("test1").SetWherePk(update1).Returning("id", "aA"),
+			stm:  "UPDATE test1 SET a_a = $1, \"b_B\" = $2, cc_cc = NULL WHERE id = $3 RETURNING json_build_object('id', id, 'aA', a_a)",
+			args: append(args, "a", 1, 22)},
 	}
 
 	for _, v := range buildResults {
-		stm, argsOut, err := v.str.Build()
+		stm, argsOut := v.str.Build()
 		assert.Equal(t, v.stm, stm)
 		assert.Equal(t, v.args, argsOut)
-		assert.Equal(t, v.err, err)
 	}
 }
 
 func TestUpdateExec(t *testing.T) {
-	if conn == nil {
-		DB(t)
-	}
+	Init(t)
 	ResetTables(t, conn, "test1", "test.\"Test2\"")
 
-	///
-	ra, err := pgxexec.Insert("test1").Values(test1Insert).Exec(conn, ctx)
-	assert.Equal(t, int64(1), ra)
+	//test 1
+	json, err := builder.Insert("test1").Values(insert1).Exec(conn, ctx)
+	assert.Equal(t, int64(1), gjson.Get(json, "rowsAffected").Int())
 	assert.Equal(t, nil, err)
 
-	ra, err = pgxexec.Update("test1").Set(test1Update).WhereValues(pk1Inst).Exec(conn, ctx)
-	assert.Equal(t, int64(1), ra)
+	u1 := map[string]interface{}{
+		"a_a": "c",
+	}
+	json, err = builder.Update("test1").Set(u1).Returning("aA").One(conn, ctx)
+	assert.Equal(t, "{\"aA\" : \"c\"}", json)
 	assert.Equal(t, nil, err)
 
-	res, err := pgxexec.Query("test1").WhereValues(pk1Inst).OneJson(conn, ctx)
-	assert.Equal(t, "{\"id\":1,\"a\":\"f\",\"b\":11,\"c\":true}", res)
+	//test 2
+	json, err = builder.Insert("test1").Values(insert1).Exec(conn, ctx)
+	assert.Equal(t, int64(1), gjson.Get(json, "rowsAffected").Int())
 	assert.Equal(t, nil, err)
 
-	///
-	ra, err = pgxexec.Insert("test.Test2").Values(test2Insert).Exec(conn, ctx)
-	assert.Equal(t, int64(1), ra)
+	var pk2 = map[string]interface{}{
+		"id": 1,
+	}
+	u2 := map[string]interface{}{
+		"aA": "f",
+		"bB": 33,
+	}
+	json, err = builder.Update("test1").Set(u2).Where(pk2).Exec(conn, ctx)
+	assert.Equal(t, int64(1), gjson.Get(json, "rowsAffected").Int())
 	assert.Equal(t, nil, err)
 
-	ra, err = pgxexec.Update("test.Test2").Set(test2Update).WhereValues(pk2Inst).Exec(conn, ctx)
-	assert.Equal(t, int64(1), ra)
+	json, err = builder.Query("test1").Where(pk2).One(conn, ctx)
+	assert.Equal(t, "{\"id\":1,\"aA\":\"f\",\"bB\":33,\"ccCc\":true}", json)
 	assert.Equal(t, nil, err)
 
-	res, err = pgxexec.Query("test.Test2").WhereValues(pk2Inst).OneJson(conn, ctx)
-	assert.Equal(t, "{\"Id\":1,\"X\":\"f\",\"Y\":11,\"Z\":true}", res)
+	//test 3
+	json, err = builder.Insert("test.Test2").Values(insert3).Exec(conn, ctx)
+	assert.Equal(t, int64(1), gjson.Get(json, "rowsAffected").Int())
 	assert.Equal(t, nil, err)
 
-	///
-	ra, err = pgxexec.Insert("test.Test2").Values(test2Insert).Exec(conn, ctx)
-	assert.Equal(t, int64(1), ra)
+	var pk3 = map[string]interface{}{
+		"id": 1,
+	}
+	u3 := map[string]interface{}{
+		"id": 1,
+		"x":  "f",
+		"y":  33,
+		"t":  99,
+	}
+	res, err := builder.Update("test.Test2").SetWherePk(u3).Returning("id", "t").OneMap(conn, ctx)
+	assert.Equal(t, float64(1), res["id"].(float64))
 	assert.Equal(t, nil, err)
 
-	err = pgxexec.Update("test.Test2").SetWherePrimaryKey(test4UpdatePk).Returning(&test2Ret).One(conn, ctx)
-	assert.Equal(t, "fff", test2Ret.X)
-	assert.Equal(t, 22, test2Ret.Y)
-	assert.Equal(t, true, test2Ret.Z)
-	assert.Equal(t, nil, err)
-
-	err = pgxexec.Update("test.Test2").SetWherePrimaryKey(test4UpdatePk).One(conn, ctx)
-	assert.Equal(t, nil, err)
-
-	//
-	json, err := pgxexec.Update("test.Test2").SetAdd("X", "S").WhereValuesAdd("Id", 1).ReturningSet("Id", &id).OneJson(conn, ctx)
-	assert.Equal(t, "{\"Id\" : 1}", json)
+	json, err = builder.Query("test.Test2").Select("id", "x", "y", "t").Where(pk3).One(conn, ctx)
+	assert.Equal(t, "{\"id\":1,\"x\":\"f\",\"y\":33}", json)
 	assert.Equal(t, nil, err)
 }

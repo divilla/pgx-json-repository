@@ -1,4 +1,4 @@
-CREATE DATABASE pgxexec_test
+CREATE DATABASE pgxjrep_test
     TEMPLATE 'template0'
     ALLOW_CONNECTIONS TRUE
     CONNECTION LIMIT -1
@@ -6,6 +6,6 @@ CREATE DATABASE pgxexec_test
     LC_COLLATE 'und-x-icu'
     LC_CTYPE 'und-x-icu';
 
-CREATE USER pgxexec WITH PASSWORD 'pgxexec_test';
-GRANT ALL PRIVILEGES ON DATABASE "pgxexec_test" to pgxexec;
-GRANT CREATE ON DATABASE "pgxexec_test" TO pgxexec;
+CREATE USER pgxjrep WITH PASSWORD 'pass';
+GRANT ALL PRIVILEGES ON DATABASE "pgxjrep_test" to pgxjrep;
+GRANT CREATE ON DATABASE "pgxjrep_test" TO pgxjrep;
