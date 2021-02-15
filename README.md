@@ -13,8 +13,8 @@ run migrations/up.sql as pgxjrep user
 - full support for upper-cased schemas, relations and columns with automatic quoting
 - exec panics on invalid shema.relation name and logs warning on invalid column names
 - build SQL Statements with maps unmarshaled directly from json request with automatic camel-cased column recognition - no need for dto structs, db and json tags 
-- execute always returns json result built on PostgreSQL Server with zero Go marshaling
-- create generic json repository with common commands and have short and clean code
+- json result is built on PostgreSQL Server with zero Go marshaling
+- generic json repository with common commands provides short and clean code
 
 ## 📌 Example repository
 ```go
