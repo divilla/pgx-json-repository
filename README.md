@@ -102,7 +102,8 @@ func main()  {
 	//builder supports concurrency you only need to define it once for entire project
 	builder, _ := pgxjrep.NewBuilder(conn, ctx)
 
-	//select all records from relation, Schema.Table will be properly quoted, you can omit schema_name on public schema
+	//select all records from relation, Schema.Table will be properly quoted, 
+	//you can omit schema_name on public schema
 	json, err := builder.Query("schema_name.table_name").All(conn, ctx)
 
 	//select * from relation where "first_name" = "a" and "last_name" is null and "active" = true
@@ -110,7 +111,8 @@ func main()  {
 		Where(map[string]interface{}{ "firstName": "a", "lastName": nil, "active": true }).
 		All(conn, ctx)
 
-	//filter all records from relation_name where "first_name" starting with "a", "last_name" is ignored, "active" is true, 
+	//filter all records from relation_name where "first_name" starting with "a", 
+	//"last_name" is ignored, "active" is true, 
 	//order by "id DESC" and select records from 61 - 90
 	json, err := builder.Query("relation_name").
 		Filter(map[string]interface{}{ "firstName": "a", "lastName": nil, "active": true }).
